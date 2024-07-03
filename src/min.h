@@ -156,6 +156,16 @@ struct min_context {
     uint8_t rx_control;                        // Control byte
     uint8_t tx_header_byte_countdown;          // Count out the header bytes
     uint8_t port;                              // Number of the port associated with the context
+    // Callbacks
+    void* context;
+    void (*application_handler)(uint8_t, uint8_t const *, uint8_t, uint8_t, void*);
+#ifdef TRANSPORT_PROTOCOL
+    uint32_t (*time_ms)(void*);
+#endif
+    uint16_t (*tx_space)(uint8_t, void*);
+    void (*tx_byte)(uint8_t, uint8_t, void*);
+    void (*tx_start)(uint8_t, void*);
+    void (*tx_finished)(uint8_t, void*);
 };
 
 #ifdef TRANSPORT_PROTOCOL
@@ -178,24 +188,24 @@ void min_poll(struct min_context *self, uint8_t const *buf, uint32_t buf_len);
 void min_transport_reset(struct min_context *self, bool inform_other_side);
 
 // CALLBACK. Handle incoming MIN frame
-void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port);
+static void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port, void* context);
 
 #ifdef TRANSPORT_PROTOCOL
 // CALLBACK. Must return current time in milliseconds.
 // Typically a tick timer interrupt will increment a 32-bit variable every 1ms (e.g. SysTick on Cortex M ARM devices).
-uint32_t min_time_ms(void);
+static uint32_t min_time_ms(void* context);
 #endif
 
 // CALLBACK. Must return current buffer space in the given port. Used to check that a frame can be
 // queued.
-uint16_t min_tx_space(uint8_t port);
+static uint16_t min_tx_space(uint8_t port, void* context);
 
 // CALLBACK. Send a byte on the given line.
-void min_tx_byte(uint8_t port, uint8_t byte);
+static void min_tx_byte(uint8_t port, uint8_t byte, void* context);
 
 // CALLBACK. Indcates when frame transmission is finished; useful for buffering bytes into a single serial call.
-void min_tx_start(uint8_t port);
-void min_tx_finished(uint8_t port);
+static void min_tx_start(uint8_t port, void* context);
+static void min_tx_finished(uint8_t port, void* context);
 
 // define to validate that MAX_PAYLOAD is defined the same value in calling code and min
 #ifdef VALIDATE_MAX_PAYLOAD

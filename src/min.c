@@ -84,7 +84,7 @@ static uint32_t crc32_finalize(struct crc32_context *context)
 static void stuffed_tx_byte(struct min_context *self, uint8_t byte, bool crc)
 {
     // Transmit the byte
-    min_tx_byte(self->port, byte);
+    self->tx_byte(self->port, byte, self->context);
     if (crc) {
         crc32_step(&self->tx_checksum, byte);
     }
@@ -92,7 +92,7 @@ static void stuffed_tx_byte(struct min_context *self, uint8_t byte, bool crc)
     // See if an additional stuff byte is needed
     if (byte == HEADER_BYTE) {
         if (--self->tx_header_byte_countdown == 0) {
-            min_tx_byte(self->port, STUFF_BYTE); // Stuff byte
+            self->tx_byte(self->port, STUFF_BYTE, self->context); // Stuff byte
             self->tx_header_byte_countdown = 2U;
         }
     } else {
@@ -108,12 +108,12 @@ static void on_wire_bytes(struct min_context *self, uint8_t id_control, uint8_t 
     self->tx_header_byte_countdown = 2U;
     crc32_init_context(&self->tx_checksum);
 
-    min_tx_start(self->port);
+    self->tx_start(self->port, self->context);
 
     // Header is 3 bytes; because unstuffed will reset receiver immediately
-    min_tx_byte(self->port, HEADER_BYTE);
-    min_tx_byte(self->port, HEADER_BYTE);
-    min_tx_byte(self->port, HEADER_BYTE);
+    self->tx_byte(self->port, HEADER_BYTE, self->context);
+    self->tx_byte(self->port, HEADER_BYTE, self->context);
+    self->tx_byte(self->port, HEADER_BYTE, self->context);
 
     stuffed_tx_byte(self, id_control, true);
     if (id_control & 0x80U) {
@@ -139,9 +139,9 @@ static void on_wire_bytes(struct min_context *self, uint8_t id_control, uint8_t 
     stuffed_tx_byte(self, (uint8_t)((checksum >> 0) & 0xffU), false);
 
     // Ensure end-of-frame doesn't contain 0xaa and confuse search for start-of-frame
-    min_tx_byte(self->port, EOF_BYTE);
+    self->tx_byte(self->port, EOF_BYTE, self->context);
 
-    min_tx_finished(self->port);
+    self->tx_finished(self->port, self->context);
 }
 
 #ifdef TRANSPORT_PROTOCOL
@@ -225,7 +225,7 @@ static void send_ack(struct min_context *self)
     // In the embedded end we don't reassemble out-of-order frames and so never ask for retransmits. Payload is
     // always the same as the sequence number.
     min_debug_print("send ACK: seq=%d\n", self->transport_fifo.rn);
-    if (ON_WIRE_SIZE(0) <= min_tx_space(self->port)) {
+    if (ON_WIRE_SIZE(0) <= self->tx_space(self->port, self->context)) {
         on_wire_bytes(self, ACK, self->transport_fifo.rn, &self->transport_fifo.rn, 0, 0xffU, 1U);
         self->transport_fifo.last_sent_ack_time_ms = now;
     }
@@ -235,7 +235,7 @@ static void send_ack(struct min_context *self)
 static void send_reset(struct min_context *self)
 {
     min_debug_print("send RESET\n");
-    if (ON_WIRE_SIZE(0) <= min_tx_space(self->port)) {
+    if (ON_WIRE_SIZE(0) <= self->tx_space(self->port, self->context)) {
         on_wire_bytes(self, RESET, 0, 0, 0, 0, 0);
     }
 }
@@ -423,7 +423,7 @@ static void valid_frame_received(struct min_context *self)
 
                 // Pass frame up to application handler to deal with
                 min_debug_print("Incoming app transport frame seq=%d, id=%d, payload len=%d\n", seq, id_control & (uint8_t)0x3fU, payload_len);
-                min_application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port);
+                self->application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port, self->context);
             } else {
                 // Discard this frame because we aren't looking for it: it's either a dupe because it was
                 // retransmitted when our ACK didn't get through in time, or else it's further on in the
@@ -434,12 +434,12 @@ static void valid_frame_received(struct min_context *self)
         } else {
             // Not a transport frame
             min_debug_print("Incoming app frame id=%d, payload len=%d\n", id_control & (uint8_t)0x3fU, payload_len);
-            min_application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port);
+            self->application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port, self->context);
         }
         break;
     }
 #else  // TRANSPORT_PROTOCOL
-    min_application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port);
+    self->application_handler(id_control & (uint8_t)0x3fU, payload, payload_len, self->port, self->context);
 #endif // TRANSPORT_PROTOCOL
 }
 
@@ -576,7 +576,7 @@ void min_poll(struct min_context *self, uint8_t const *buf, uint32_t buf_len)
 #ifdef TRANSPORT_PROTOCOL
     uint8_t window_size;
 
-    now = min_time_ms();
+    now = self->time_ms(self->context);
 
     bool remote_connected = (now - self->transport_fifo.last_received_anything_ms < TRANSPORT_IDLE_TIMEOUT_MS);
     bool remote_active = (now - self->transport_fifo.last_received_frame_ms < TRANSPORT_IDLE_TIMEOUT_MS);
@@ -586,7 +586,7 @@ void min_poll(struct min_context *self, uint8_t const *buf, uint32_t buf_len)
     if ((window_size < TRANSPORT_MAX_WINDOW_SIZE) && (self->transport_fifo.n_frames > window_size)) {
         // There are new frames we can send; but don't even bother if there's no buffer space for them
         struct transport_frame *frame = transport_fifo_get(self, window_size);
-        if (ON_WIRE_SIZE(frame->payload_len) <= min_tx_space(self->port)) {
+        if (ON_WIRE_SIZE(frame->payload_len) <= self->tx_space(self->port, self->context)) {
             frame->seq = self->transport_fifo.sn_max;
             transport_fifo_send(self, frame);
 
@@ -600,7 +600,7 @@ void min_poll(struct min_context *self, uint8_t const *buf, uint32_t buf_len)
             struct transport_frame *oldest_frame = find_retransmit_frame(self);
             if (now - oldest_frame->last_sent_time_ms >= TRANSPORT_FRAME_RETRANSMIT_TIMEOUT_MS) {
                 // Resending oldest frame if there's a chance there's enough space to send it
-                if (ON_WIRE_SIZE(oldest_frame->payload_len) <= min_tx_space(self->port)) {
+                if (ON_WIRE_SIZE(oldest_frame->payload_len) <= self->tx_space(self->port, self->context)) {
                     transport_fifo_send(self, oldest_frame);
                 }
             }
@@ -637,6 +637,16 @@ void min_init_context(struct min_context *self, uint8_t port)
     self->rx_frame_state = SEARCHING_FOR_SOF;
     self->port = port;
 
+    self->context = 0;
+    self->application_handler = &min_application_handler;
+#ifdef TRANSPORT_PROTOCOL
+    self->time_ms = &min_time_ms;
+#endif
+    self->tx_space = &min_tx_space;
+    self->tx_byte = &min_tx_byte;
+    self->tx_start = &min_tx_start;
+    self->tx_finished = &min_tx_finished;
+
 #ifdef TRANSPORT_PROTOCOL
     // Counters for diagnosis purposes
     self->transport_fifo.spurious_acks = 0;
@@ -650,10 +660,19 @@ void min_init_context(struct min_context *self, uint8_t port)
     min_debug_print("MIN init complete\n");
 }
 
+void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port, void* context) {}
+#ifdef TRANSPORT_PROTOCOL
+uint32_t min_time_ms(void* context) {}
+#endif
+uint16_t min_tx_space(uint8_t port, void* context) {}
+void min_tx_byte(uint8_t port, uint8_t byte, void* context) {}
+void min_tx_start(uint8_t port, void* context) {}
+void min_tx_finished(uint8_t port, void* context) {}
+
 // Sends an application MIN frame on the wire (do not put into the transport queue)
 void min_send_frame(struct min_context *self, uint8_t min_id, uint8_t const *payload, uint8_t payload_len)
 {
-    if ((ON_WIRE_SIZE(payload_len) <= min_tx_space(self->port))) {
+    if ((ON_WIRE_SIZE(payload_len) <= self->tx_space(self->port, self->context))) {
         on_wire_bytes(self, min_id & (uint8_t)0x3fU, 0, payload, 0, 0xffffU, payload_len);
     }
 }

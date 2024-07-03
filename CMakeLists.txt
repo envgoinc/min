@@ -4,8 +4,8 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_C_STANDARD 90)
 
 set(SOURCE_FILES
-        target/min.c
-        target/min.h)
+        src/min.c
+        src/min.h)
 
 add_compile_options(
         -Wall
