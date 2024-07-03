@@ -57,6 +57,26 @@ enum {
 // Where the payload data of the frame FIFO is stored
 uint8_t payloads_ring_buffer[TRANSPORT_FIFO_MAX_FRAME_DATA];
 
+// CALLBACK. Handle incoming MIN frame
+static void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port, void* context);
+
+#ifdef TRANSPORT_PROTOCOL
+// CALLBACK. Must return current time in milliseconds.
+// Typically a tick timer interrupt will increment a 32-bit variable every 1ms (e.g. SysTick on Cortex M ARM devices).
+static uint32_t min_time_ms(void* context);
+#endif
+
+// CALLBACK. Must return current buffer space in the given port. Used to check that a frame can be
+// queued.
+static uint16_t min_tx_space(uint8_t port, void* context);
+
+// CALLBACK. Send a byte on the given line.
+static void min_tx_byte(uint8_t port, uint8_t byte, void* context);
+
+// CALLBACK. Indcates when frame transmission is finished; useful for buffering bytes into a single serial call.
+static void min_tx_start(uint8_t port, void* context);
+static void min_tx_finished(uint8_t port, void* context);
+
 static uint32_t now;
 static void send_reset(struct min_context *self);
 #endif
@@ -662,9 +682,9 @@ void min_init_context(struct min_context *self, uint8_t port)
 
 void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port, void* context) {}
 #ifdef TRANSPORT_PROTOCOL
-uint32_t min_time_ms(void* context) {}
+uint32_t min_time_ms(void* context) { return 0; }
 #endif
-uint16_t min_tx_space(uint8_t port, void* context) {}
+uint16_t min_tx_space(uint8_t port, void* context) { return 0; }
 void min_tx_byte(uint8_t port, uint8_t byte, void* context) {}
 void min_tx_start(uint8_t port, void* context) {}
 void min_tx_finished(uint8_t port, void* context) {}

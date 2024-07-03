@@ -187,26 +187,6 @@ void min_poll(struct min_context *self, uint8_t const *buf, uint32_t buf_len);
 // Reset the state machine and (optionally) tell the other side that we have done so
 void min_transport_reset(struct min_context *self, bool inform_other_side);
 
-// CALLBACK. Handle incoming MIN frame
-static void min_application_handler(uint8_t min_id, uint8_t const *min_payload, uint8_t len_payload, uint8_t port, void* context);
-
-#ifdef TRANSPORT_PROTOCOL
-// CALLBACK. Must return current time in milliseconds.
-// Typically a tick timer interrupt will increment a 32-bit variable every 1ms (e.g. SysTick on Cortex M ARM devices).
-static uint32_t min_time_ms(void* context);
-#endif
-
-// CALLBACK. Must return current buffer space in the given port. Used to check that a frame can be
-// queued.
-static uint16_t min_tx_space(uint8_t port, void* context);
-
-// CALLBACK. Send a byte on the given line.
-static void min_tx_byte(uint8_t port, uint8_t byte, void* context);
-
-// CALLBACK. Indcates when frame transmission is finished; useful for buffering bytes into a single serial call.
-static void min_tx_start(uint8_t port, void* context);
-static void min_tx_finished(uint8_t port, void* context);
-
 // define to validate that MAX_PAYLOAD is defined the same value in calling code and min
 #ifdef VALIDATE_MAX_PAYLOAD
 void min_init_context_validate(struct min_context *self, uint8_t port, void *p_rx_frame_checksum);
